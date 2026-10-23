@@ -1,14 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kenny · Operations</title><link rel="stylesheet" href="/dashboard.css"></head>
+<title>Kenny · Operations</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&amp;family=Nunito:wght@700;800&amp;family=Plus+Jakarta+Sans:wght@500;700&amp;display=swap" rel="stylesheet"><link rel="stylesheet" href="/dashboard.css"></head>
 <body>
-<header><div class="brand"><span class="brand-icon">K</span><div><h1>Kenny</h1><span class="muted">Operations</span></div></div><span id="connection" class="connection">Connecting…</span><button id="stop" class="stop">EMERGENCY STOP</button></header>
+<header><div class="brand"><span class="brand-icon" aria-hidden="true">🤖</span><div><h1>KENNY OPS</h1><span class="muted">ARCADE DEBUG SUITE</span></div></div><span id="connection" class="connection">Connecting…</span><button id="stop" class="stop">EMERGENCY STOP</button></header>
 <main>
 <div id="banner" class="banner" role="status"><span id="stopState">Waiting for robot state</span><span id="stopDetail" class="muted"></span><button id="reset" disabled>Reset stop</button></div>
 <div id="message" role="alert"></div>
 <nav aria-label="Dashboard sections"><button class="tab active" data-page="overview">Overview</button><button class="tab" data-page="debugger">Decision debugger</button><button class="tab" data-page="diagnostics">Diagnostics</button><button class="tab" data-page="editorPage">Map creator</button><span id="piBrief" class="muted"></span></nav>
 
 <section id="overview">
+<div class="section-heading"><div><h2>Overview</h2><p class="muted">Live robot state, environment, and requests.</p></div><span class="badge">Live operations</span></div>
+<section class="card deployment-strip"><div class="toolbar"><strong id="deploymentMode">Simulation mode</strong><button id="simulationMode">Simulation</button><button id="controllerMode">Continuous controller test</button><button id="robotMode">Switch to Robot</button><button id="syncMap">Sync Render map</button><a id="debugJoystick" href="http://localhost:8766/" target="_blank" rel="noopener" hidden>Open two-ESP32 speed joystick ↗</a><span id="deploymentState" class="muted" role="status">Controller test sends continuous wheel-speed targets to the ESP32s; Robot mode retains its current navigation setting.</span></div></section>
+<div class="overview-label">Sensor status</div>
 <div class="health-grid">
  <div class="health"><span>RGB camera</span><strong id="rgbHealth">Waiting</strong></div>
  <div class="health"><span>Depth</span><strong id="depthHealth">Waiting</strong></div>
@@ -17,15 +20,21 @@
  <div class="health"><span>ArUco scanner</span><strong id="arucoHealth">Waiting</strong></div>
  <div class="health"><span>MPU6050 IMU</span><strong id="imuHealth">Waiting</strong></div>
 </div>
- <section class="card"><div class="toolbar"><button id="retryLidar">Retry LiDAR</button><button id="retryCamera">Retry RGB-D camera</button><button id="retryImu">Retry MPU6050</button><span id="sensorRetryState" class="muted" role="status">Plug in a missing sensor, then retry. Live status above confirms connection.</span></div></section>
- <section class="card"><div class="card-title"><h2>LiDAR orientation</h2></div><p class="muted">Face Kenny's front and place one known object there. Compare the nearest front/left/right/rear readings below. Yaw rotates the scan relative to Kenny; Invert swaps scan handedness. Applying restarts LiDAR, mounts, and navigation with STOP latched.</p><div class="toolbar"><label>Mount yaw <select id="lidarYaw"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label><label><input type="checkbox" id="lidarInvert"> Invert scan handedness</label><button id="lidarApply">Apply LiDAR orientation</button></div><div id="lidarSectors" class="muted">Waiting for LiDAR scan sectors…</div><div id="lidarOrientationState" class="muted" role="status"></div></section>
-  <section class="card"><div class="toolbar"><strong id="deploymentMode">Simulation mode</strong><button id="simulationMode">Simulation</button><button id="controllerMode">Continuous controller test</button><button id="robotMode">Switch to Robot</button><button id="syncMap">Sync Render map</button><a id="debugJoystick" href="http://localhost:8766/" target="_blank" rel="noopener" hidden>Open two-ESP32 speed joystick ↗</a><span id="deploymentState" class="muted" role="status">Controller test sends continuous wheel-speed targets to the ESP32s; Robot mode retains its current navigation setting.</span></div></section>
+ <section class="card sensor-recovery"><div class="toolbar"><span class="recovery-label">Hardware recovery bus</span><button id="retryLidar">Retry LiDAR</button><button id="retryCamera">Retry RGB-D camera</button><button id="retryImu">Retry MPU6050</button><span id="sensorRetryState" class="muted" role="status">Plug in a missing sensor, then retry. Live status above confirms connection.</span></div></section>
+ <div class="overview-label">Drive engine &amp; physical actuators</div>
+ <div class="overview-controls">
   <section class="card"><div class="toolbar"><label>Robot drive <select id="robotDriveMode"><option value="pwm">Short PWM steps</option><option value="velocity">Continuous wheel speed (V3)</option></select></label><button id="applyDriveMode">Apply robot drive</button><span id="driveModeState" class="muted" role="status">Changing mode relatches STOP and restarts navigation. Continuous turns use fresh, depth-supported ArUco heading when available.</span></div></section>
   <section class="card"><div class="toolbar"><button id="forward75" disabled>Move real robot forward · 75% · 0.5 seconds</button><span id="forwardPulseResult" class="muted" role="status">Physical ESP32 drive. Navigation must be paused; each pulse ends automatically.</span></div></section>
   <section class="card"><div class="toolbar"><button id="supervisedRun" disabled>Supervised Robot run · 15 seconds</button><span id="supervisedRunState" class="muted" role="status">Allows current map-pose uncertainty for a timed drive while live LiDAR/depth clearance remains above 0.30 m. STOP relatches automatically.</span></div></section>
+ <section class="card"><div class="card-title"><h2>LiDAR orientation</h2></div><p class="muted">Face Kenny's front and place one known object there. Compare the nearest front/left/right/rear readings below. Yaw rotates the scan relative to Kenny; Invert swaps scan handedness. Applying restarts LiDAR, mounts, and navigation with STOP latched.</p><div class="toolbar"><label>Mount yaw <select id="lidarYaw"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label><label><input type="checkbox" id="lidarInvert"> Invert scan handedness</label><button id="lidarApply">Apply LiDAR orientation</button></div><div id="lidarSectors" class="muted">Waiting for LiDAR scan sectors…</div><div id="lidarOrientationState" class="muted" role="status"></div></section>
+ </div>
+ <div class="overview-label">Navigation state</div>
+ <div class="overview-summary">
  <section class="card"><h2>Navigation readiness</h2><div id="navigationReadiness" class="muted">Checking measured localization and sensors…</div></section>
  <section class="card"><h2>Depth obstacle estimate</h2><strong id="nearestObstacle">Waiting for measured depth</strong><div id="depthObstacleDetails" class="muted"></div><div id="imuDetails" class="muted"></div></section>
  <section class="card"><div class="card-title"><h2>Kenny pose estimate</h2><span id="poseSource" class="badge">Unavailable</span></div><strong id="poseCoordinates">Waiting for localization</strong><div id="poseDetails" class="muted"></div></section>
+ </div>
+<div class="overview-label">Environment and live vision</div>
 <div class="workspace">
  <section class="card map-card"><div class="card-title"><div><h2>Environment</h2><span id="mapName" class="muted">Loading selected map…</span></div><span id="mapSourceBadge" class="badge">—</span></div>
   <div class="toolbar"><div class="segmented"><button id="showMap" class="selected">Map</button><button id="showScan">LiDAR scan</button></div><select id="mapSource" aria-label="Map source"><option value="auto">Live map when available</option><option value="prior">Saved map</option></select><label><input type="checkbox" id="markerLabels" checked> IDs</label><button id="fitMap">Fit</button></div>
@@ -38,13 +47,18 @@
   <details id="depthPanel" open><summary>Depth view <span id="depthBrief" class="muted"></span></summary><div class="vision-frame"><img id="depthPreview" alt="Live Astra measured depth" hidden><div id="depthEmpty" class="empty">Waiting for depth frames</div></div><div id="depthState" class="camera-caption muted"></div></details>
  </section>
 </div>
+<div class="overview-label">Scan and dispatch</div>
+<div class="operations-grid">
 <section class="card aruco-card"><div class="card-title"><div><h2>ArUco scan log</h2><span id="arucoStatus" class="muted">Waiting for detector</span></div><button id="arucoExport">Export log</button></div>
  <div id="visibleMarkers" class="marker-chips"></div><div id="arucoLog" class="scan-log"></div><div class="log-options"><label><input type="checkbox" id="repeatScans"> Include repeat scans</label><span id="dictionary" class="muted"></span></div>
 </section>
+<div class="requests-panel">
 <section class="mission-line"><div><span class="muted">Robot</span><strong id="missionState">Monitoring</strong></div><div><span class="muted">Measured motion</span><strong id="motionBrief">—</strong></div><div><span class="muted">Destination</span><strong id="goalBrief">—</strong></div><a id="editor" target="_blank" rel="noopener">Open map creator ↗</a></section>
   <section class="card"><div class="card-title"><h2>Manual test request</h2></div><div class="toolbar"><label>Destination <select id="manualMarker"><option value="">Select a mapped ArUco…</option></select></label><button id="manualRequest" disabled>Request pickup</button><span id="manualRequestState" class="muted" role="status">Send the same cloud request as the phone scanner. It joins the queue and obeys the selected robot/simulation mode.</span></div></section>
   <section class="card"><div class="card-title"><h2>Cloud request queue</h2></div><div id="queueList" class="scroll muted">Checking queued requests…</div><div id="queueCancelState" class="muted" role="status">Only unclaimed queued requests can be cancelled. A running trip is shown but cannot be removed here.</div></section>
   <section class="card"><div class="card-title"><h2>Request process log</h2><button id="requestExport">Export log</button></div><div id="requestState" class="muted">Waiting for cloud queue status…</div><div id="requestLog" class="scan-log" aria-live="polite"></div></section>
+</div>
+</div>
 </section>
 
 <section id="debugger" hidden>
