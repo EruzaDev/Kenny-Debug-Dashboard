@@ -1,0 +1,18 @@
+{
+  "base_frame": "base_link",
+  "base_convention": "Ground-projected wheel-centre midpoint; x forward, y left, z up. Heights are above the floor.",
+  "mounts": [
+    {
+      "frame": "camera_link",
+      "xyz_m": [0.10, 0.03, 0.345],
+      "rpy_deg": [0.6669, 34.8717, 0.0],
+      "measurement": "Owner: lens 34.5 cm above floor, approximately 10 cm forward and 3 cm left of base center. Initial 20-degree downward estimate corrected using five logged depth-plane normals from ID 2, confirmed by owner to lie flat on mapped floor: median pitch 34.8717 degrees, roll 0.6669 degrees. Driver RGB origin coincides with camera_link."
+    },
+    {
+      "frame": "laser_frame",
+      "xyz_m": [0.0, 0.0, 0.38],
+      "rpy_deg": [0.0, 0.0, 180.0],
+      "measurement": "Owner corrected orientation: LiDAR centered and level, scanning plane approximately 38 cm above floor; sensor zero-angle points toward Kenny's back, so mounting yaw is 180 degrees."
+    }
+  ]
+}
