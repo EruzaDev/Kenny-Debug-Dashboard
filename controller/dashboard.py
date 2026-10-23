@@ -168,6 +168,8 @@ class Diagnostics:
         self.events = deque(maxlen=300)
         self.samples = deque(maxlen=120)
         self.request_events = deque(maxlen=200)
+        self.decision_traces = deque(maxlen=240)
+        self.feedback = deque(maxlen=500)
         self.observed_queue = {}
         self.last_pose = None
         self.estop = True
@@ -199,6 +201,19 @@ class Diagnostics:
         self.logger = logging.getLogger('kenny.operations')
         self.logger.setLevel(logging.INFO)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.feedback_path = log_path.parent / 'debug-feedback.jsonl'
+        try:
+            with self.feedback_path.open('rb') as previous_feedback:
+                previous_feedback.seek(max(0, self.feedback_path.stat().st_size - 512_000))
+                for line in previous_feedback.read().splitlines():
+                    try:
+                        item = json.loads(line)
+                        if isinstance(item, dict):
+                            self.feedback.append(item)
+                    except (ValueError, TypeError):
+                        pass
+        except OSError:
+            pass
         # Restore recent scan events, but never restore them as live sightings.
         try:
             with log_path.open('rb') as previous_log:
@@ -261,6 +276,9 @@ class Diagnostics:
                                 for i, v in enumerate(change) if i != wheel))
                         self.calibration['pulses'][name] = dict(self.bench_result)
             if name == 'controller':
+                decision = value.get('decision')
+                if isinstance(decision, dict):
+                    self.decision_traces.append(decision)
                 keys = ('reason', 'guard', 'status', 'marker_id', 'emergency_stop')
                 if previous is None or any(previous.get(k) != value.get(k) for k in keys):
                     self.event(name, json.dumps({k: value.get(k) for k in keys}))
@@ -315,6 +333,34 @@ class Diagnostics:
             return
         self.request_events.append(event)
         self.event('request', json.dumps(event, allow_nan=False))
+
+    def add_feedback(self, item):
+        if not isinstance(item, dict):
+            raise ValueError('Feedback must be an object')
+        comment = item.get('comment')
+        if not isinstance(comment, str) or not comment.strip() or len(comment) > 4000:
+            raise ValueError('Feedback comment must contain 1-4000 characters')
+        kind = item.get('kind', 'observation')
+        if kind not in ('observation', 'correction', 'map', 'navigation', 'safety'):
+            raise ValueError('Unsupported feedback kind')
+        record = {
+            'time': time.time(),
+            'kind': kind,
+            'comment': comment.strip(),
+            'expected_action': str(item.get('expected_action', '')).strip()[:1000],
+            'decision_id': item.get('decision_id'),
+            'map_revision': self.revision,
+            'map_sha256': self.deployment.get('map_sha256'),
+            'pose': self.pose_estimate(),
+        }
+        json.dumps(record, allow_nan=False)
+        with self.lock:
+            self.feedback.append(record)
+            with self.feedback_path.open('a') as output:
+                output.write(json.dumps(record, allow_nan=False) + '\n')
+            self.event('operator_feedback', json.dumps({
+                'kind': kind, 'decision_id': record['decision_id'], 'comment': record['comment']}), 'INFO')
+        return record
 
     def observe_queue(self, jobs):
         """Show pending cloud requests even when navigation is intentionally paused."""
@@ -572,7 +618,8 @@ class Diagnostics:
                      'wheel_calibration': self.calibration,
                     'ground_pulse': self.ground_pulse,
                     'packets': {k: {'age_s': round(now - v['received'], 3), 'data': v['data']} for k, v in self.packets.items()},
-                    'events': list(self.events), 'history': list(self.samples), 'topics': self.graph,
+                     'events': list(self.events), 'history': list(self.samples), 'topics': self.graph,
+                     'decisions': list(self.decision_traces), 'feedback': list(self.feedback),
                     'aruco': self.aruco.snapshot(), 'map_summary': self.map_summary(),
                     'map_revision': self.revision, 'deployment': dict(self.deployment)}
             result.update(pose_estimate=self.pose_estimate(), request_events=list(self.request_events))
@@ -954,6 +1001,12 @@ def make_handler(store, node):
                     if not isinstance(request, dict):
                         raise ValueError('Expected a queued request object')
                     return self.respond({'request': cancel_queued_request(store, request.get('job_id'))})
+                elif self.path == '/api/feedback':
+                    size = int(self.headers.get('Content-Length', 0))
+                    if not 1 <= size <= 8192:
+                        raise ValueError('Invalid feedback size')
+                    feedback = json.loads(self.rfile.read(size))
+                    return self.respond({'feedback': store.add_feedback(feedback)})
                 elif self.path == '/api/lidar/orientation':
                     from controller.deployment import service
                     from controller.lidar_orientation import set_settings, settings

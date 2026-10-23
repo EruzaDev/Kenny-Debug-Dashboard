@@ -58,6 +58,7 @@ class ResidentPolicy:
             'clip_range': lambda _: float(training.get('clip_range', .2)), 'clip_range_vf': None})
         self.history = deque(maxlen=self.config.history)
         self.requested = self.executed = np.array([-1., 0.], dtype=np.float32)
+        self.last_explanation = None
         # Allocate and warm inference once. This is not a sensor observation or command.
         self.model.predict(np.zeros(self.contract['frame_size'] * self.config.history, dtype=np.float32), deterministic=True)
 
@@ -81,6 +82,8 @@ class ResidentPolicy:
                   np.asarray(velocity) / [r.max_speed, r.max_turn_rate], self.requested, self.executed,
                   [uncertainty / .5, min(marker_age / 30., 1.), float(uncertainty < .35)],
                   [max(0., now - sensors['lidar'][2]), 0., float(intervened)]]
+        names = [name for name, _ in FEATURES]
+        raw_values = [np.asarray(v).ravel().tolist() for v in values]
         frame = np.clip(np.concatenate([np.asarray(v).ravel() for v in values]), -1, 1).astype(np.float32)
         if frame.size != self.contract['frame_size'] or not np.isfinite(frame).all():
             raise ValueError('Live observation does not match checkpoint contract')
@@ -92,7 +95,21 @@ class ResidentPolicy:
         if np.asarray(action).shape != (2,) or not np.isfinite(action).all():
             raise ValueError('Policy returned an invalid action')
         self.requested = np.clip(action, -1, 1)
-        return [(self.requested[0] + 1) * r.max_speed / 2, self.requested[1] * r.max_turn_rate]
+        command = [(self.requested[0] + 1) * r.max_speed / 2, self.requested[1] * r.max_turn_rate]
+        self.last_explanation = {
+            'time': float(now),
+            'feature_names': names,
+            'features': raw_values,
+            'normalized_action': self.requested.tolist(),
+            'policy_command': list(command),
+            'goal_relative_m': values[10],
+            'measured_velocity': values[11],
+            'localization_health': values[14],
+            'sensor_age_and_guard': values[15],
+            'intervened_by_previous_guard': bool(intervened),
+            'history_length': len(self.history),
+        }
+        return command
 
     def record_executed(self, command):
         self.executed = np.array([2 * command[0] / self.robot.max_speed - 1,

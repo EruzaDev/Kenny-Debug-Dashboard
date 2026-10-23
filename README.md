@@ -59,6 +59,21 @@ ssh -N -o ExitOnForwardFailure=yes \
 Then open `http://localhost:8002`. The dashboard must remain bound to loopback;
 do not expose port `8002` directly to the network.
 
+## Decision Debugger
+
+Open **Decision debugger** to inspect the latest controller decision and its
+bounded timeline. It shows the controller belief pose, an independent pose
+reference, goal and route revision, policy feature groups, requested versus
+guarded motion, safety reason, and measured context. The **Operator feedback**
+form writes timestamped observations to `data/debug-feedback.jsonl`; feedback is
+never applied directly to motion or safety settings.
+
+Use **Export AI review packet** to produce a JSON bundle for offline review. An
+AI or engineer should reproduce the decision, add a regression test, and make a
+reviewed code/configuration change rather than allowing free text to alter the
+robot. Map geometry is edited in **Map creator**, then synchronized through the
+existing map deployment flow.
+
 ## Browser Launcher
 
 After the dashboard service is running in a graphical desktop session, the

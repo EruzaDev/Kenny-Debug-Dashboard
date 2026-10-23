@@ -7,6 +7,7 @@ let lastSuccess = 0, lastDetails = 0, mapRequest = 0, zoom = 1, pan = [0, 0], dr
 const editorUrl = new URL(location.href);
 editorUrl.port = '8001'; editorUrl.pathname = '/'; editorUrl.search = ''; editorUrl.hash = '';
 $('editor').href = $('editorStandalone').href = editorUrl.href;
+$('debugMapCreator').href = editorUrl.href;
 $('ws').textContent = 'ws://' + editorUrl.host + '/api/live';
 const fresh = (name, limit = 2) => state?.packets[name] && state.packets[name].age_s <= limit;
 const visibleIds = () => new Set((state?.aruco?.seen || []).filter(v => v.last_seen_age_s < 2).map(v => v.id));
@@ -14,17 +15,18 @@ const visibleIds = () => new Set((state?.aruco?.seen || []).filter(v => v.last_s
 function setPage(next) {
   page = next;
   if (location.hash !== '#' + next) history.replaceState(null, '', '#' + next);
-  for (const id of ['overview', 'diagnostics', 'editorPage']) $(id).hidden = id !== next;
+  for (const id of ['overview', 'debugger', 'diagnostics', 'editorPage']) $(id).hidden = id !== next;
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.page === next));
   if (next === 'diagnostics') renderDetails(true);
+  if (next === 'debugger') renderDebugger(true);
   if (next === 'overview') drawMap();
   if (next === 'editorPage') $('editorPanel').open = true;
 }
 document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => setPage(tab.dataset.page));
-if (location.hash === '#diagnostics' || location.hash === '#editorPage') setPage(location.hash.slice(1));
+if (location.hash === '#debugger' || location.hash === '#diagnostics' || location.hash === '#editorPage') setPage(location.hash.slice(1));
 window.addEventListener('hashchange', () => {
   const next = location.hash.slice(1);
-  if (['overview', 'diagnostics', 'editorPage'].includes(next)) setPage(next);
+  if (['overview', 'debugger', 'diagnostics', 'editorPage'].includes(next)) setPage(next);
 });
 $('editorPanel').addEventListener('toggle', () => {
   if ($('editorPanel').open && !$('editorFrame').src) $('editorFrame').src = editorUrl.href;
@@ -282,6 +284,57 @@ function renderPoseAndRequests() {
   $('requestLog').innerHTML = events.length ? table(events.map(e => [new Date(e.time*1000).toLocaleTimeString(), e.marker_id == null ? '—' : 'ID ' + e.marker_id, e.stage.replaceAll('_',' '), e.detail, e.job_id?.slice(0,8)]), ['Time','Destination','Stage','Process','Request']) : '<p class="muted">No request events recorded yet.</p>';
 }
 
+function poseText(pose) {
+  return Array.isArray(pose) && pose.length >= 3 ? 'x ' + fmt(pose[0]) + ' m · y ' + fmt(pose[1]) + ' m · yaw ' + fmt(pose[2] * 180 / Math.PI, 1) + '°' : 'Unavailable';
+}
+
+function renderDebugger(force = false) {
+  if (!state || page !== 'debugger' && !force) return;
+  const controller = state.packets.controller?.data || {}, decision = controller.decision || {}, policy = decision.policy || {};
+  const reference = state.packets.aruco?.data?.robot_pose?.pose || state.pose_estimate?.pose;
+  const allowed = decision.motion_allowed === true;
+  $('decisionBadge').textContent = decision.id ? (allowed ? 'Motion permitted' : 'Motion withheld') : 'Waiting';
+  $('decisionBadge').className = 'badge ' + (allowed ? 'decision-good' : decision.id ? 'decision-warn' : '');
+  $('decisionSummary').textContent = decision.id ? 'Decision #' + decision.id + ' · ' + (controller.status || 'status unavailable') + (decision.guard ? ' · guard: ' + decision.guard : ' · no guard rejection') : 'The controller has not published a structured decision trace yet.';
+  $('decisionFreshness').textContent = decision.recorded_at ? 'Recorded ' + new Date(decision.recorded_at * 1000).toLocaleTimeString() + ' · map revision ' + (decision.route_revision ?? '—') : '';
+  $('decisionPose').innerHTML = [
+    ['Controller belief', poseText(decision.belief_pose), decision.belief_pose_source || 'SLAM / covariance'],
+    ['Independent reference', poseText(reference), state.packets.aruco?.data?.robot_pose ? 'Surveyed ArUco' : 'Dashboard estimate'],
+    ['Goal', poseText(decision.goal), controller.marker_id == null ? 'No active destination' : 'ArUco ' + controller.marker_id],
+    ['Motion', 'Requested ' + (decision.requested_command || []).map(v => fmt(v, 3)).join(' / ') + ' · sent ' + (decision.guarded_command || []).map(v => fmt(v, 3)).join(' / '), decision.motion_allowed ? 'Allowed' : 'Stopped / blocked']
+  ].map(row => '<div><span class="muted">' + esc(row[0]) + '</span><strong>' + esc(row[1]) + '</strong><span class="muted">' + esc(row[2]) + '</span></div>').join('');
+  const names = policy.feature_names || [], features = policy.features || [];
+  const featureRows = names.map((name, i) => [name, JSON.stringify(features[i] ?? [])]);
+  const basis = [
+    ['Action chain', '<p>Policy command: <code>' + esc(JSON.stringify(decision.requested_command || [])) + '</code><br>After guard: <code>' + esc(JSON.stringify(decision.guarded_command || [])) + '</code><br>Permission: <strong class="' + (allowed ? 'decision-good' : 'decision-warn') + '">' + (allowed ? 'allowed' : 'withheld') + '</strong></p>'],
+    ['Safety gates', '<p>Guard reason: <code>' + esc(decision.guard || 'none') + '</code><br>Heading source: ' + esc(decision.heading_source || 'unknown') + ' · heading error: ' + esc(fmt(decision.heading_error_deg, 1)) + '°<br>Uncertainty: ' + esc(fmt(decision.uncertainty_m)) + ' m · route points: ' + esc(decision.route_points ?? '—') + '</p>'],
+    ['Policy inputs', featureRows.length ? table(featureRows, ['Feature group', 'Values used']) : '<p class="muted">This decision was not produced by the PPO policy, or the controller has not been updated with trace support.</p>'],
+    ['Inference context', '<p>Model history frames: ' + esc(policy.history_length ?? '—') + '<br>Previous guard intervention: ' + esc(policy.intervened_by_previous_guard ?? '—') + '<br>Inference time: ' + esc(fmt(controller.inference_ms, 2)) + ' ms</p>']
+  ];
+  $('decisionBasis').innerHTML = basis.map(([title, body]) => '<details open><summary>' + esc(title) + '</summary>' + body + '</details>').join('');
+  const traces = (state.decisions || []).slice(-120).reverse();
+  $('decisionTimeline').innerHTML = traces.length ? table(traces.map(item => [item.id, item.recorded_at ? new Date(item.recorded_at * 1000).toLocaleTimeString() : '—', item.motion_allowed ? 'allowed' : 'withheld', (item.requested_command || []).map(v => fmt(v, 3)).join(' / '), (item.guarded_command || []).map(v => fmt(v, 3)).join(' / '), item.guard || 'none']), ['ID', 'Time', 'Permission', 'Requested v/w', 'Sent v/w', 'Reason']) : '<p class="muted">No decision traces recorded yet.</p>';
+  const feedback = (state.feedback || []).slice(-100).reverse();
+  $('feedbackLog').innerHTML = feedback.length ? table(feedback.map(item => [new Date(item.time * 1000).toLocaleTimeString(), item.kind, item.decision_id ?? '—', item.expected_action || '—', item.comment]), ['Time', 'Type', 'Decision', 'Expected action', 'Comment']) : '<p class="muted">No operator feedback saved yet.</p>';
+  const summary = state.map_summary || {}, deployment = state.deployment || {};
+  $('debugMapState').textContent = (summary.name || 'Map unavailable') + ' · ' + (summary.source || 'unknown source') + ' · revision ' + (summary.revision ?? '—') + ' · ' + (summary.marker_count ?? 0) + ' markers' + (deployment.map_sha256 ? ' · hash ' + deployment.map_sha256.slice(0, 12) : '');
+}
+
+$('saveFeedback').onclick = async () => {
+  const comment = $('feedbackComment').value.trim();
+  if (!comment) { $('feedbackState').textContent = 'Write an observation before saving.'; return; }
+  $('saveFeedback').disabled = true; $('feedbackState').textContent = 'Saving local feedback…';
+  const decision = state?.packets?.controller?.data?.decision;
+  try {
+    const response = await fetch('/api/feedback', {method:'POST', headers:{'Content-Type':'application/json','X-Kenny-Control':'operations'}, body:JSON.stringify({kind:$('feedbackKind').value, comment, expected_action:$('feedbackAction').value, decision_id:decision?.id ?? null}), signal:AbortSignal.timeout(5000)});
+    const result = await response.json(); if (!response.ok) throw Error(result.detail || 'Feedback rejected');
+    $('feedbackComment').value = ''; $('feedbackAction').value = ''; $('feedbackState').textContent = 'Saved at ' + new Date(result.feedback.time * 1000).toLocaleTimeString() + '. It will not change motion automatically.';
+    const latest = await fetch('/api/status?detail=1', {signal:AbortSignal.timeout(3000)}); if (latest.ok) render(await latest.json());
+  } catch (error) { $('feedbackState').textContent = 'Could not save feedback: ' + error.message; }
+  finally { $('saveFeedback').disabled = false; }
+};
+$('debugExport').onclick = () => download(JSON.stringify({exported_at:new Date().toISOString(), purpose:'AI or engineer review; not an executable command', state, decisions:state?.decisions || [], feedback:state?.feedback || []}, null, 2), 'kenny-ai-review-packet.json');
+
 function health(id, value, status = 'good') { $(id).textContent = value; $(id).className = status; }
 function render(s) {
   state = s; lastSuccess = Date.now();
@@ -367,7 +420,7 @@ function render(s) {
   $('missionState').textContent = c ? c.guard || c.status || (c.ready ? 'Ready' : c.reason) : 'Monitoring · navigation not started';
   $('motionBrief').textContent = fresh('odom', .5) ? fmt(o.v) + ' m/s · ' + fmt(o.w) + ' rad/s' : 'Waiting for odometry';
   $('goalBrief').textContent = c?.marker_id != null ? 'ArUco ' + c.marker_id : 'No active trip';
-  renderVision(); renderAruco(); renderPoseAndRequests();
+  renderVision(); renderAruco(); renderPoseAndRequests(); renderDebugger();
   if (page === 'overview') drawMap();
   if (page === 'diagnostics') renderDetails();
 }

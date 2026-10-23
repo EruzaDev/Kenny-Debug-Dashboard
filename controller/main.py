@@ -129,6 +129,7 @@ def make_node(args, policy, environment):
             self.sensor_errors = {}
             self.depth_observation = {}
             self.inference_ms = None
+            self.decision_sequence = 0
             self.odom_sequence = 0
             self.last_map = None
             self.map_event = threading.Event()
@@ -820,6 +821,7 @@ def make_node(args, policy, environment):
             with self.mutex:
                 snapshot = self.snapshot()
                 now = time.monotonic()
+                self.decision_sequence += 1
                 def age(value):
                     return round(now - value, 3) if math.isfinite(value) else None
                 sensors = {}
@@ -829,6 +831,25 @@ def make_node(args, policy, environment):
                         'age_s': age(packet[2]), 'valid_fraction': float(np.mean(packet[1])),
                         'minimum': float(np.min(packet[0][packet[1]])) if np.any(packet[1]) else None,
                         'values': packet[0].tolist(), 'valid': packet[1].tolist()}
+                policy_explanation = self.policy.last_explanation
+                decision = {
+                    'id': self.decision_sequence,
+                    'recorded_at': time.time(),
+                    'belief_pose': list(self.pose) if self.pose is not None else None,
+                    'belief_pose_source': 'slam_covariance',
+                    'actual_pose': list(self.local_pose) if self.local_pose is not None else None,
+                    'goal': list(self.goal) if self.goal is not None else None,
+                    'route_points': len(self.route),
+                    'route_revision': self.mapping.revision,
+                    'requested_command': list(policy_explanation['policy_command']) if policy_explanation else list(self.last_command),
+                    'guarded_command': list(self.last_command),
+                    'motion_allowed': bool(self.motion_allowed),
+                    'guard': self.guard_reason or None,
+                    'heading_source': self.heading_source,
+                    'heading_error_deg': self.heading_error_deg,
+                    'uncertainty_m': self.uncertainty if math.isfinite(self.uncertainty) else None,
+                    'policy': policy_explanation,
+                }
                 message = {**snapshot, 'status': self.status, 'guard': self.guard_reason,
                             'ready_without_stop': self.snapshot(ignore_stop=True)['ready'],
                            'goal': self.goal, 'marker_id': self.goal_job['marker_id'] if self.goal_job else None,
@@ -852,7 +873,8 @@ def make_node(args, policy, environment):
                             'last_tf_error': self.last_tf_error, 'sensor_errors': dict(self.sensor_errors),
                             'depth_observation': dict(self.depth_observation),
                             'mission': self.last_mission_event,
-                           'inference_ms': self.inference_ms}
+                            'decision': decision,
+                            'inference_ms': self.inference_ms}
                 if self.roaming:
                     message.update(mode='local_roaming',ready=not bool(self.guard_reason),
                                    reason=self.guard_reason,goal=None,marker_id=None)
